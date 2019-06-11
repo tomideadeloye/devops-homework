@@ -1,0 +1,163 @@
+---
+AWSTemplateFormatVersion: "2010-09-09"
+Description: AWS VPC CloudFormation Stack
+Parameters:
+  pKeypair:
+    Description: EC2 Keypair to attach to the underlying instance for SSH access.
+    Type: 'AWS::EC2::KeyPair::KeyName'
+    MinLength: '1'
+    MaxLength: '64'
+    Default: tomide-aws
+  pInstanceType:
+    Description: AWS instance type to launch NAT instance on.
+    Type: String
+    Default: t2.micro
+    AllowedValues:
+      - t2.medium
+      - t2.micro
+      - t2.large
+      - t2.xlarge
+      - t2.2xlarge
+      - m4.medium
+      - m4.large
+      - m4.xlarge
+      - m4.2xlarge
+  pAMI:
+    Description: Server AMI to launch the NAT instance from, Default is ubuntu 18 in us-west-1
+    Type: String
+    # Ubuntu 18 AMI us-west-1
+    Default: ami-005bdb005fb00e791
+Resources:
+  rHardwareELBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties: 
+      GroupName: HardwareELBSG
+      GroupDescription: Security group for loadbalancer
+      SecurityGroupIngress:
+        - SourceSecurityGroupId: !ImportValue VPC-WebServerSG
+          FromPort: 80
+          IpProtocol: tcp
+          ToPort: 80
+        - SourceSecurityGroupId: !ImportValue VPC-WebServerSG
+          FromPort: 5001
+          IpProtocol: tcp
+          ToPort: 5001
+        - CidrIp: 0.0.0.0/0
+          FromPort: 80
+          IpProtocol: tcp
+          ToPort: 80
+      VpcId: !ImportValue VPC-vpcid
+  rHardwareSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties: 
+      GroupName: HardwareServerSG
+      GroupDescription: Security group for Hardware servers
+      SecurityGroupIngress:
+        - SourceSecurityGroupId: !Ref rHardwareELBSecurityGroup
+          FromPort: 80
+          IpProtocol: tcp
+          ToPort: 80
+        - SourceSecurityGroupId: !ImportValue VPC-WebServerSG
+          FromPort: 5001
+          IpProtocol: tcp
+          ToPort: 5001
+        - SourceSecurityGroupId: !Ref rHardwareELBSecurityGroup
+          FromPort: 5001
+          IpProtocol: tcp
+          ToPort: 5001
+        - CidrIp: 0.0.0.0/0
+          FromPort: 80
+          IpProtocol: tcp
+          ToPort: 80
+        - CidrIp: 0.0.0.0/0
+          FromPort: 5001
+          IpProtocol: tcp
+          ToPort: 5001
+      SecurityGroupEgress:
+        - SourceSecurityGroupId: !Ref rHardwareELBSecurityGroup
+          FromPort: 5001
+          ToPort: 5001
+          IpProtocol: tcp
+        - CidrIp: 0.0.0.0/0
+          FromPort: -1
+          IpProtocol: -1
+          ToPort: -1
+      VpcId: !ImportValue VPC-vpcid
+  rHardwareLaunchConfig:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties:
+      IamInstanceProfile: !ImportValue CodedeployProfile
+      ImageId: !Ref pAMI
+      InstanceType: !Ref pInstanceType
+      KeyName: !Ref pKeypair
+      SecurityGroups:
+        - !ImportValue VPC-DBServerSG
+        - !Ref rHardwareSecurityGroup
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          apt update
+          apt install postgresql postgresql-contrib ruby -y
+          snap install jq
+          apt install python3-pip -y
+          apt install python3-psycopg2 libpq-dev wget -y
+          pip3 install --upgrade pip
+          snap install aws-cli --classic
+          cd /home/ubuntu && wget https://aws-codedeploy-us-west-2.s3.us-west-2.amazonaws.com/latest/install
+          cd /home/ubuntu && chmod +x ./install
+          /home/ubuntu/install auto
+          service codedeploy-agent start
+
+  rHardwareLoadBalancer:
+    Type: AWS::ElasticLoadBalancing::LoadBalancer
+    Properties:
+      CrossZone: true
+      HealthCheck:
+        HealthyThreshold: 5
+        Interval: 30
+        Target: TCP:5001
+        Timeout: 20
+        UnhealthyThreshold: 5
+      Listeners:
+      - InstancePort: 5001
+        InstanceProtocol: HTTP
+        LoadBalancerPort: 80
+        Protocol: HTTP
+      LoadBalancerName: HardwareLB
+      Scheme: internal
+      SecurityGroups:
+        - !Ref rHardwareELBSecurityGroup
+      Subnets:
+        - !ImportValue VPC-SubnetAPublic
+        - !ImportValue VPC-SubnetBPublic
+      Tags:
+        - Key: Name
+          Value: Hardware Load Balancer
+
+  rHardwareASG:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: HardwareASG
+      DesiredCapacity: 1
+      HealthCheckGracePeriod: 10
+      HealthCheckType: EC2
+      LaunchConfigurationName: !Ref rHardwareLaunchConfig
+      LoadBalancerNames:
+        - !Ref rHardwareLoadBalancer
+      MaxSize: 2
+      MinSize: 1
+      VPCZoneIdentifier:
+        - !ImportValue VPC-SubnetAPrivate
+        - !ImportValue VPC-SubnetBPrivate
+      Tags:
+        - Key: Name
+          Value: !Join [ ":",[ "Rescale", !ImportValue VPC-EnvTag , !Sub "${AWS::StackName}"]]
+          PropagateAtLaunch: true
+  rAddSimpleScalingPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties: 
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName: !Ref rHardwareASG
+      PolicyType: SimpleScaling
+      Cooldown: 60
+      ScalingAdjustment: 1

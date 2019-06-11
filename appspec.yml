@@ -1,0 +1,22 @@
+version: 0.0
+os: linux
+files:
+  - source: /
+    destination: /home/ubuntu/rescale
+permissions:
+  # sets ubuntu as the owner:group for the application deployment directory
+  - object: /home/ubuntu/
+    pattern: "**"
+    owner: ubuntu
+    group: ubuntu
+    mode: 744
+hooks:
+  AfterInstall:
+    - location: deploy/hooks/after_install.sh
+      timeout: 580
+  ApplicationStart:
+    - location: deploy/hooks/start.sh
+      timeout: 580
+  ValidateService:
+    - location: deploy/hooks/validate.sh
+      timeout: 580

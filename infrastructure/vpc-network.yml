@@ -1,0 +1,531 @@
+---
+AWSTemplateFormatVersion: "2010-09-09"
+Description: AWS VPC CloudFormation Stack
+Parameters:
+  pVpcCidr:
+    Description: Set VPC CIDR Block
+    Type: String
+    Default: 10.0.0.1/16
+    AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
+    ConstraintDescription: Must be a valid IP CIDR range of the form x.x.x.x/x.
+  pVpcSubnetCidrs:
+    Description: Enter comma-delimited list of VPC Subnet CIDR blocks
+    Type: CommaDelimitedList
+    Default: 10.0.0.1/24,10.0.32.1/24,10.0.16.1/24,10.0.48.1/24
+  pEnvTag:
+    Description: Set Environment Tag as Development, Stage, Production
+    Type: String
+    Default: Development
+    AllowedValues: [Development, Stage, Production]
+  pAZVar:
+    Description: Set Availability Zone Variables
+    Type: CommaDelimitedList
+    Default: AZ1, AZ2, AZ3
+  pNetworkLabelVar:
+    Description: Set Network Label Variables
+    Type: CommaDelimitedList
+    Default: Public, Private 
+  pTierVar:
+    Description: Set Tier Variables
+    Type: CommaDelimitedList
+    Default: App, Data
+  pKeypair:
+    Description: EC2 Keypair to attach to the underlying instance for SSH access.
+    Type: 'AWS::EC2::KeyPair::KeyName'
+    MinLength: '1'
+    MaxLength: '64'
+    Default: tomide-aws
+  pNATInstanceType:
+    Description: AWS instance type to launch NAT instance on.
+    Type: String
+    Default: t2.micro
+    AllowedValues:
+      - t2.medium
+      - t2.micro
+      - t2.large
+      - t2.xlarge
+      - t2.2xlarge
+      - m4.medium
+      - m4.large
+      - m4.xlarge
+      - m4.2xlarge
+  pNATAMI:
+    Description: Server AMI to launch the NAT instance from, Default is ubuntu 18 in us-west-1
+    Type: String
+    # Ubuntu 18 AMI us-west-1
+    Default: ami-005bdb005fb00e791
+Resources:
+  rVpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref pVpcCidr
+      InstanceTenancy: default
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Join [ ":",[ "Rescale", !Ref pEnvTag, "VPC"]]
+        - Key: Environment
+          Value: !Ref pEnvTag
+  rInternetGateway:
+    Type: 'AWS::EC2::InternetGateway'
+    Properties:
+      Tags:
+        - Key: Description
+          Value: !Join [ ":",[ "Rescale", !Ref pEnvTag, "Igw"]]
+        - Key: Name
+          Value: !Join [ ":",[ "Rescale", !Ref pEnvTag, "Igw"]]
+  rVPCGatewayAttachment:
+    Type: 'AWS::EC2::VPCGatewayAttachment'
+    Properties:
+      VpcId: !Ref rVpc
+      InternetGatewayId: !Ref rInternetGateway                
+  rSubnetAPublic:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: !Select [0, !Ref pVpcSubnetCidrs]
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      VpcId: !Ref rVpc
+      Tags:
+        - Key: Description
+          Value: !Join [ ":",[ "Rescale", !Ref pEnvTag , !Select [0, !Ref pAZVar ], !Select [0, !Ref pTierVar ], !Select [0, !Ref pNetworkLabelVar ], "Subnet"]]
+        - Key: Name
+          Value: !Join [ ":",[ "Rescale", !Ref pEnvTag , !Select [0, !Ref pAZVar ], !Select [0, !Ref pTierVar ], !Select [0, !Ref pNetworkLabelVar ], "Subnet"]]
+        - Key: Environment
+          Value: !Ref pEnvTag
+  rSubnetBPublic:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: !Select [1, !Ref pVpcSubnetCidrs]
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      VpcId: !Ref rVpc
+      Tags:
+        - Key: Description
+          Value: !Join [ ":",[ "Rescale", !Ref pEnvTag , !Select [1, !Ref pAZVar ], !Select [0, !Ref pTierVar ], !Select [0, !Ref pNetworkLabelVar ], "Subnet"]]
+        - Key: Name
+          Value: !Join [ ":",[ "Rescale", !Ref pEnvTag , !Select [1, !Ref pAZVar ], !Select [0, !Ref pTierVar ], !Select [0, !Ref pNetworkLabelVar ], "Subnet"]]
+        - Key: Environment
+          Value: !Ref pEnvTag
+  rSubnetAPrivate:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: !Select [2, !Ref pVpcSubnetCidrs]
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      VpcId: !Ref rVpc
+      Tags:
+        - Key: Description
+          Value: !Join [ ":",[ "Rescale", !Ref pEnvTag , !Select [0, !Ref pAZVar ], !Select [1, !Ref pTierVar ], !Select [1, !Ref pNetworkLabelVar ], "Subnet"]]
+        - Key: Name
+          Value: !Join [ ":",[ "Rescale", !Ref pEnvTag , !Select [0, !Ref pAZVar ], !Select [1, !Ref pTierVar ], !Select [1, !Ref pNetworkLabelVar ], "Subnet"]]
+        - Key: Environment
+          Value: !Ref pEnvTag
+  rSubnetBPrivate:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: !Select [3, !Ref pVpcSubnetCidrs]
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      VpcId: !Ref rVpc
+      Tags:
+        - Key: Description
+          Value: !Join [ ":",[ "Rescale", !Ref pEnvTag , !Select [1, !Ref pAZVar ], !Select [1, !Ref pTierVar ], !Select [1, !Ref pNetworkLabelVar ], "Subnet"]]
+        - Key: Name
+          Value: !Join [ ":",[ "Rescale", !Ref pEnvTag , !Select [1, !Ref pAZVar ], !Select [1, !Ref pTierVar ], !Select [1, !Ref pNetworkLabelVar ], "Subnet"]]
+        - Key: Environment
+          Value: !Ref pEnvTag
+  rRouteTableAPublic:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref rVpc
+      Tags:
+        - Key: Description
+          Value: !Join [ ":",[ "Rescale", !Ref pEnvTag , !Select [0, !Ref pTierVar ], !Select [0, !Ref pNetworkLabelVar ], "route-table"]]
+        - Key: Name
+          Value: !Join [ ":",[ "Rescale", !Ref pEnvTag , !Select [0, !Ref pTierVar ], !Select [0, !Ref pNetworkLabelVar ], "route-table"]]
+        - Key: Environment
+          Value: !Ref pEnvTag
+  rRouteTableAPrivate:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref rVpc
+      Tags:
+        - Key: Description
+          Value: !Join [ ":",[ "Rescale", !Ref pEnvTag , !Select [1, !Ref pTierVar ], !Select [1, !Ref pNetworkLabelVar ], "route-table"]]
+        - Key: Name
+          Value: !Join [ ":",[ "Rescale", !Ref pEnvTag , !Select [1, !Ref pTierVar ], !Select [1, !Ref pNetworkLabelVar ], "route-table"]]
+        - Key: Environment
+          Value: !Ref pEnvTag
+  rRouteTableBPublic:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref rVpc
+      Tags:
+        - Key: Description
+          Value: !Join [ ":",[ "Rescale", !Ref pEnvTag , !Select [0, !Ref pTierVar ], !Select [0, !Ref pNetworkLabelVar ], "route-table"]]
+        - Key: Name
+          Value: !Join [ ":",[ "Rescale", !Ref pEnvTag , !Select [0, !Ref pTierVar ], !Select [0, !Ref pNetworkLabelVar ], "route-table"]]
+        - Key: Environment
+          Value: !Ref pEnvTag
+  rRouteTableBPrivate:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref rVpc
+      Tags:
+        - Key: Description
+          Value: !Join [ ":",[ "Rescale", !Ref pEnvTag , !Select [1, !Ref pTierVar ], !Select [1, !Ref pNetworkLabelVar ], "route-table"]]
+        - Key: Name
+          Value: !Join [ ":",[ "Rescale", !Ref pEnvTag , !Select [1, !Ref pTierVar ], !Select [1, !Ref pNetworkLabelVar ], "route-table"]]
+        - Key: Environment
+          Value: !Ref pEnvTag          
+  rRouteTableAssociationAPublic:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref rSubnetAPublic
+      RouteTableId: !Ref rRouteTableAPublic
+  rRouteTableAssociationAPrivate:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref rSubnetAPrivate
+      RouteTableId: !Ref rRouteTableAPrivate
+  rRouteTableAssociationBPublic:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref rSubnetBPublic
+      RouteTableId: !Ref rRouteTableBPublic
+  rRouteTableAssociationBPrivate:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref rSubnetBPrivate
+      RouteTableId: !Ref rRouteTableBPrivate
+  rRouteTablePublicAInternetRoute:
+    Type: 'AWS::EC2::Route'
+    DependsOn: rVPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref rRouteTableAPublic
+      DestinationCidrBlock: '0.0.0.0/0'
+      GatewayId: !Ref rInternetGateway
+  rRouteTablePublicBInternetRoute:
+    Type: 'AWS::EC2::Route'
+    DependsOn: rVPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref rRouteTableBPublic
+      DestinationCidrBlock: '0.0.0.0/0'
+      GatewayId: !Ref rInternetGateway
+  rRouteTablePrivateARoute:
+    Type: 'AWS::EC2::Route'
+    DependsOn: ['rNATInstance', 'rRouteTableAPrivate']
+    Properties:
+      RouteTableId: !Ref rRouteTableAPrivate
+      DestinationCidrBlock: '0.0.0.0/0'
+      InstanceId: !Ref rNATInstance
+  rRouteTablePrivateBRoute:
+    Type: 'AWS::EC2::Route'
+    DependsOn: ['rNATInstance', 'rRouteTableBPrivate']
+    Properties:
+      RouteTableId: !Ref rRouteTableBPrivate
+      DestinationCidrBlock: '0.0.0.0/0'
+      InstanceId: !Ref rNATInstance
+  rNetworkAclPublic:
+    Type: 'AWS::EC2::NetworkAcl'
+    Properties:
+      VpcId: !Ref rVpc
+      Tags:
+      - Key: Name
+        Value: Public
+  rNetworkAclPrivate:
+    Type: 'AWS::EC2::NetworkAcl'
+    Properties:
+      VpcId: !Ref rVpc
+      Tags:
+      - Key: Name
+        Value: Private
+  rSubnetNetworkAclAssociationAPublic:
+    Type: 'AWS::EC2::SubnetNetworkAclAssociation'
+    Properties:
+      SubnetId: !Ref rSubnetAPublic
+      NetworkAclId: !Ref rNetworkAclPublic
+  rSubnetNetworkAclAssociationAPrivate:
+    Type: 'AWS::EC2::SubnetNetworkAclAssociation'
+    Properties:
+      SubnetId: !Ref rSubnetAPrivate
+      NetworkAclId: !Ref rNetworkAclPrivate
+  rSubnetNetworkAclAssociationBPublic:
+    Type: 'AWS::EC2::SubnetNetworkAclAssociation'
+    Properties:
+      SubnetId: !Ref rSubnetBPublic
+      NetworkAclId: !Ref rNetworkAclPublic
+  rSubnetNetworkAclAssociationBPrivate:
+    Type: 'AWS::EC2::SubnetNetworkAclAssociation'
+    Properties:
+      SubnetId: !Ref rSubnetBPrivate
+      NetworkAclId: !Ref rNetworkAclPrivate
+  rNetworkAclEntryInPublicAllowAll:
+    Type: 'AWS::EC2::NetworkAclEntry'
+    Properties:
+      NetworkAclId: !Ref rNetworkAclPublic
+      RuleNumber: 99
+      Protocol: -1
+      RuleAction: allow
+      Egress: false
+      CidrBlock: '0.0.0.0/0'
+  rNetworkAclEntryOutPublicAllowAll:
+    Type: 'AWS::EC2::NetworkAclEntry'
+    Properties:
+      NetworkAclId: !Ref rNetworkAclPublic
+      RuleNumber: 99
+      Protocol: -1
+      RuleAction: allow
+      Egress: true
+      CidrBlock: '0.0.0.0/0'
+  rNetworkAclEntryInPrivateAllowVPC:
+    Type: 'AWS::EC2::NetworkAclEntry'
+    Properties:
+      NetworkAclId: !Ref rNetworkAclPrivate
+      RuleNumber: 99
+      Protocol: -1
+      RuleAction: allow
+      Egress: false
+      CidrBlock: '0.0.0.0/0'
+  rNetworkAclEntryOutPrivateAllowVPC:
+    Type: 'AWS::EC2::NetworkAclEntry'
+    Properties:
+      NetworkAclId: !Ref rNetworkAclPrivate
+      RuleNumber: 99
+      Protocol: -1
+      RuleAction: allow
+      Egress: true
+      CidrBlock: '0.0.0.0/0'
+  rWebServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties: 
+      GroupName: WebServerSG
+      GroupDescription: Security group for web servers
+      SecurityGroupEgress:
+        - CidrIp: 0.0.0.0/0
+          IpProtocol: -1
+      SecurityGroupIngress:
+        - CidrIp: 0.0.0.0/0
+          FromPort: 80
+          IpProtocol: tcp
+          ToPort: 80
+        - CidrIp: 0.0.0.0/0
+          FromPort: 443
+          IpProtocol: tcp
+          ToPort: 443
+        - CidrIp: 0.0.0.0/0
+          FromPort: 22
+          IpProtocol: tcp
+          ToPort: 22
+      VpcId: !Ref rVpc
+  rWebSecurityGroupIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref rWebServerSecurityGroup
+      IpProtocol: -1
+      FromPort: -1
+      ToPort: -1
+      SourceSecurityGroupId: !Ref rWebServerSecurityGroup
+  rDBServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties: 
+      GroupName: DBServerSG
+      GroupDescription: Security group for DB/Backend servers
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          SourceSecurityGroupId: !Ref rWebServerSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !Ref rNATInstanceSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          SourceSecurityGroupId: !Ref rNATInstanceSecurityGroup
+      SecurityGroupIngress:
+        - FromPort: 5432
+          IpProtocol: tcp
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref rWebServerSecurityGroup
+        - IpProtocol: -1
+          SourceSecurityGroupId: !Ref rWebServerSecurityGroup
+        - IpProtocol: -1
+          SourceSecurityGroupId: !Ref rNATInstanceSecurityGroup
+        - FromPort: 22
+          IpProtocol: tcp
+          ToPort: 22
+          SourceSecurityGroupId: !Ref rWebServerSecurityGroup
+      VpcId: !Ref rVpc
+  rDBSecurityGroupIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref rDBServerSecurityGroup
+      IpProtocol: -1
+      FromPort: -1
+      ToPort: -1
+      SourceSecurityGroupId: !Ref rDBServerSecurityGroup
+  rNATInstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties: 
+      GroupName: NATSG
+      GroupDescription: Security group for NAT Instance
+      SecurityGroupEgress:
+        - CidrIp: 0.0.0.0/0
+          FromPort: 80
+          ToPort: 80
+          IpProtocol: tcp
+        - CidrIp: !Select [2, !Ref pVpcSubnetCidrs]
+          FromPort: 22
+          ToPort: 22
+          IpProtocol: tcp
+        - CidrIp: !Select [3, !Ref pVpcSubnetCidrs]
+          FromPort: 22
+          ToPort: 22
+          IpProtocol: tcp
+        - CidrIp: 0.0.0.0/0
+          FromPort: 443
+          ToPort: 443
+          IpProtocol: tcp
+        - CidrIp: 0.0.0.0/0
+          FromPort: -1
+          ToPort: -1
+          IpProtocol: icmp
+      SecurityGroupIngress:
+        - CidrIp: !Select [2, !Ref pVpcSubnetCidrs]
+          FromPort: 80
+          ToPort: 80
+          IpProtocol: tcp
+        - CidrIp: !Select [3, !Ref pVpcSubnetCidrs]
+          FromPort: 80
+          ToPort: 80
+          IpProtocol: tcp
+        - CidrIp: !Select [2, !Ref pVpcSubnetCidrs]
+          FromPort: 443
+          ToPort: 443
+          IpProtocol: tcp
+        - CidrIp: !Select [3, !Ref pVpcSubnetCidrs]
+          FromPort: 443
+          ToPort: 443
+          IpProtocol: tcp
+        - CidrIp: 0.0.0.0/0
+          FromPort: 22
+          IpProtocol: tcp
+          ToPort: 22
+        - CidrIp: !Select [2, !Ref pVpcSubnetCidrs]
+          FromPort: -1
+          ToPort: -1
+          IpProtocol: icmp
+        - CidrIp: !Select [3, !Ref pVpcSubnetCidrs]
+          FromPort: -1
+          ToPort: -1
+          IpProtocol: icmp
+      VpcId: !Ref rVpc
+  rNATSGIngress1:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref rNATInstanceSecurityGroup
+      IpProtocol: icmp
+      FromPort: -1
+      ToPort: -1
+      SourceSecurityGroupId: !Ref rNATInstanceSecurityGroup
+  rNATInstance:
+    Type: AWS::EC2::Instance
+    Properties: 
+      ImageId: ami-0553ff0c22b782b45 #community ami for nat instance
+      InstanceInitiatedShutdownBehavior: stop
+      InstanceType: !Ref pNATInstanceType
+      KeyName: !Ref pKeypair
+      SecurityGroupIds: 
+        - !Ref rNATInstanceSecurityGroup
+      SourceDestCheck: false
+      SubnetId: !Ref rSubnetAPublic
+      Tags: 
+        - Key: Name
+          Value: NAT instance - Do not Delete
+  rIAMCodeDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: CodeDeployRole
+      Path: /
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+                - codedeploy.amazonaws.com
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSCodeDeployRole
+      Policies:
+      - PolicyName: CodeDeployPolicy
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action: 
+                - 'ec2:DescribeInstances'
+                - 'elasticloadbalancing:DescribeLoadBalancers'
+                - 'rds:DescribeDBInstances'
+                - 's3:Get*'
+                - 's3:List*'
+                - 'secretsmanager:GetSecretValue'
+                - 'secretsmanager:DescribeSecret'
+                - 'secretsmanager:ListSecrets'
+                - 'ec2:DescribeTags'
+              Resource: '*'
+  rCodeDeployInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      InstanceProfileName: CodeDeployInstanceProfile
+      Roles:
+      - CodeDeployRole
+    DependsOn: rIAMCodeDeployRole
+Outputs:
+  oVpc:
+    Value: !Ref rVpc
+    Description: VPC ID of the newly created VPC
+    Export: 
+      Name: !Sub "${AWS::StackName}-vpcid"
+  oSubnet1: 
+    Value: !Ref rSubnetAPublic
+    Description: az1 public environment 
+    Export: 
+      Name: !Sub "${AWS::StackName}-SubnetAPublic"
+  oSubnet2: 
+    Value: !Ref rSubnetBPublic
+    Description: az2 public environment
+    Export: 
+      Name: !Sub "${AWS::StackName}-SubnetBPublic"
+  oSubnet3: 
+    Value: !Ref rSubnetAPrivate
+    Description: az1 private environment
+    Export: 
+      Name: !Sub "${AWS::StackName}-SubnetAPrivate"
+  oSubnet4:
+    Value: !Ref rSubnetBPrivate
+    Description: az2 private environment
+    Export:
+      Name: !Sub "${AWS::StackName}-SubnetBPrivate"
+  oWebServerSG:
+    Value: !Ref rWebServerSecurityGroup
+    Description: web server security group
+    Export:
+      Name: !Sub "${AWS::StackName}-WebServerSG"
+  oDBServerSG:
+    Value: !Ref rDBServerSecurityGroup
+    Description: DB server security group
+    Export:
+      Name: !Sub "${AWS::StackName}-DBServerSG"
+  oEnvTag:
+    Value: !Ref pEnvTag
+    Description: Environment
+    Export:
+      Name: !Sub "${AWS::StackName}-EnvTag"
+  oCodedeployProfile:
+    Value: !Ref rCodeDeployInstanceProfile
+    Description: Instance profile for codedeploy
+    Export:
+      Name: CodedeployProfile

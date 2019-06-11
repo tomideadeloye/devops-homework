@@ -1,0 +1,181 @@
+---
+AWSTemplateFormatVersion: "2010-09-09"
+Description: AWS VPC CloudFormation Stack
+Parameters:
+  pKeypair:
+    Description: EC2 Keypair to attach to the underlying instance for SSH access.
+    Type: 'AWS::EC2::KeyPair::KeyName'
+    MinLength: '1'
+    MaxLength: '64'
+    Default: tomide-aws
+  pInstanceType:
+    Description: AWS instance type to launch NAT instance on.
+    Type: String
+    Default: t2.micro
+    AllowedValues:
+      - t2.medium
+      - t2.micro
+      - t2.large
+      - t2.xlarge
+      - t2.2xlarge
+      - m4.medium
+      - m4.large
+      - m4.xlarge
+      - m4.2xlarge
+  pAMI:
+    Description: Server AMI to launch the NAT instance from, Default is ubuntu 18 in us-west-1
+    Type: String
+    # Ubuntu 18 AMI us-west-1
+    Default: ami-005bdb005fb00e791
+Resources:
+  rPortalELBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties: 
+      GroupName: PortalELBSG
+      GroupDescription: Security group for loadbalancer
+      SecurityGroupIngress:
+        - CidrIp: 0.0.0.0/0
+          FromPort: 80
+          IpProtocol: tcp
+          ToPort: 80
+      VpcId: !ImportValue VPC-vpcid
+  rPortalSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties: 
+      GroupName: PortalServerSG
+      GroupDescription: Security group for Portal servers
+      SecurityGroupIngress:
+        - SourceSecurityGroupId: !Ref rPortalELBSecurityGroup
+          FromPort: 80
+          IpProtocol: tcp
+          ToPort: 80
+        - CidrIp: 0.0.0.0/0
+          FromPort: 80
+          IpProtocol: tcp
+          ToPort: 80
+        - SourceSecurityGroupId: !Ref rPortalELBSecurityGroup
+          FromPort: 5000
+          IpProtocol: tcp
+          ToPort: 5000
+      SecurityGroupEgress:
+        - SourceSecurityGroupId: !Ref rPortalELBSecurityGroup
+          FromPort: 5000
+          ToPort: 5000
+          IpProtocol: tcp
+        - CidrIp: 0.0.0.0/0
+          FromPort: -1
+          IpProtocol: -1
+          ToPort: -1
+      VpcId: !ImportValue VPC-vpcid
+  rPortalLaunchConfig:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties:
+      IamInstanceProfile: !ImportValue CodedeployProfile
+      ImageId: !Ref pAMI
+      InstanceType: !Ref pInstanceType
+      KeyName: !Ref pKeypair
+      SecurityGroups:
+        - !ImportValue VPC-WebServerSG
+        - !Ref rPortalSecurityGroup
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          apt update
+          apt install postgresql postgresql-contrib ruby -y
+          snap install jq
+          apt install python3-pip -y
+          apt install python3-psycopg2 libpq-dev wget -y
+          pip3 install --upgrade pip
+          snap install aws-cli --classic
+          cd /home/ubuntu && wget https://aws-codedeploy-us-west-2.s3.us-west-2.amazonaws.com/latest/install
+          cd /home/ubuntu && chmod +x ./install
+          /home/ubuntu/install auto
+          service codedeploy-agent start
+
+  rPortalLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      IpAddressType: ipv4
+      Name: PortalALB
+      Scheme: internet-facing
+      SecurityGroups:
+        - !Ref rPortalELBSecurityGroup
+      Subnets:
+        - !ImportValue VPC-SubnetAPublic
+        - !ImportValue VPC-SubnetBPublic
+      Tags:
+        - Key: Name
+          Value: Portal Load Balancer
+      Type: application
+  rPortalTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckEnabled: True
+      HealthCheckIntervalSeconds: 70
+      HealthCheckPath: /
+      HealthCheckPort: 5000
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 60
+      HealthyThresholdCount: 2
+      Name: PortalTG
+      Port: 5000
+      Protocol: HTTP
+      Tags:
+        - Key: Name
+          Value: Portal Load Target Group
+      TargetType: instance
+      UnhealthyThresholdCount: 2
+      VpcId: !ImportValue VPC-vpcid
+  rPortalListener1:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+      - Type: forward
+        TargetGroupArn:
+          Ref: rPortalTargetGroup
+      LoadBalancerArn:
+        Ref: rPortalLoadBalancer
+      Port: '80'
+      Protocol: HTTP
+  rPortalASG:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: PortalASG
+      DesiredCapacity: 1
+      HealthCheckGracePeriod: 10
+      HealthCheckType: EC2
+      LaunchConfigurationName: !Ref rPortalLaunchConfig
+      TargetGroupARNs: 
+        - !Ref rPortalTargetGroup
+      MaxSize: 2
+      MinSize: 1
+      VPCZoneIdentifier:
+        - !ImportValue VPC-SubnetAPublic
+        - !ImportValue VPC-SubnetBPublic
+      Tags:
+        - Key: Name
+          Value: !Join [ ":",[ "Rescale", !ImportValue VPC-EnvTag , !Sub "${AWS::StackName}"]]
+          PropagateAtLaunch: true
+  rAddSimpleScalingPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties: 
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName: !Ref rPortalASG
+      PolicyType: SimpleScaling
+      Cooldown: 60
+      ScalingAdjustment: 1
+
+  #limitation with codedeploy not copying target group attachement to new autoscaling group for new deployments
+
+  # rAddTargetScalingPolicy:
+  #   Type: AWS::AutoScaling::ScalingPolicy
+  #   Properties: 
+  #     AutoScalingGroupName: !Ref rPortalASG
+  #     PolicyType: TargetTrackingScaling
+  #     Cooldown: 60
+  #     TargetTrackingConfiguration:
+  #       DisableScaleIn: false
+  #       PredefinedMetricSpecification:
+  #         PredefinedMetricType: ALBRequestCountPerTarget
+  #         ResourceLabel: !Join [ "/",[ !GetAtt rPortalLoadBalancer.LoadBalancerFullName , !GetAtt rPortalTargetGroup.TargetGroupFullName]]
+  #       TargetValue: 5
