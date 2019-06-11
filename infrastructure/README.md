@@ -1,5 +1,9 @@
 # Infrastructure
 
+### Prerequisites
+
+- AMI ID should be Ubuntu 18.04 
+
 There are 4 cloudformation templates which build the infrastructure:
 - vpc-network.yml
 - portal.yml

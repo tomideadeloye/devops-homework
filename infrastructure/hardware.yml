@@ -161,3 +161,24 @@ Resources:
       PolicyType: SimpleScaling
       Cooldown: 60
       ScalingAdjustment: 1
+
+  rAddHardwareASGAlarmCPUUtil:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      ActionsEnabled: false
+      AlarmActions:
+        - !Ref rAddSimpleScalingPolicy
+      AlarmDescription: CPU Utilization Alarm
+      AlarmName: Hardware-Add-CPU-Util
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: AutoScalingGroupName
+          Value: !Ref rHardwareASG
+      DatapointsToAlarm: 3
+      EvaluationPeriods: 4
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Period: 60
+      Statistic: Average
+      Threshold: 70
+      Unit: Percent

@@ -165,6 +165,28 @@ Resources:
       Cooldown: 60
       ScalingAdjustment: 1
 
+  rAddPortalASGAlarmCPUUtil:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      ActionsEnabled: false
+      AlarmActions:
+        - !Ref rAddSimpleScalingPolicy
+      AlarmDescription: CPU Utilization Alarm
+      AlarmName: Portal-Add-CPU-Util
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: AutoScalingGroupName
+          Value: !Ref rPortalASG
+      DatapointsToAlarm: 3
+      EvaluationPeriods: 4
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Period: 60
+      Statistic: Average
+      Threshold: 70
+      Unit: Percent
+
+
   #limitation with codedeploy not copying target group attachement to new autoscaling group for new deployments
 
   # rAddTargetScalingPolicy:
